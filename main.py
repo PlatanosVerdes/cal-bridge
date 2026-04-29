@@ -62,7 +62,7 @@ def _load_creds(account: str) -> Optional[Credentials]:
     return creds
 
 
-def _fetch_events(service, calendar_id: str, time_min: datetime, time_max: datetime) -> list:
+def _fetch_events(service, calendar_id: str, calendar_name: str, time_min: datetime, time_max: datetime) -> list:
     result = (
         service.events()
         .list(
@@ -83,7 +83,8 @@ def _fetch_events(service, calendar_id: str, time_min: datetime, time_max: datet
             "end": e["end"].get("dateTime", e["end"].get("date")),
             "all_day": "date" in e["start"],
             "location": e.get("location"),
-            "calendar": calendar_id,
+            "calendar_id": calendar_id,
+            "calendar_name": calendar_name,
         }
         for e in result.get("items", [])
     ]
@@ -161,7 +162,7 @@ def get_events(
     all_events = []
     for cal in cal_list.get("items", []):
         try:
-            all_events.extend(_fetch_events(service, cal["id"], now, end))
+            all_events.extend(_fetch_events(service, cal["id"], cal["summary"], now, end))
         except Exception:
             pass
 
