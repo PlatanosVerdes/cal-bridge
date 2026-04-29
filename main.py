@@ -1,4 +1,3 @@
-import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -63,6 +62,33 @@ def _load_creds(account: str) -> Optional[Credentials]:
     return creds
 
 
+def _fetch_events(service, calendar_id: str, time_min: datetime, time_max: datetime) -> list:
+    result = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat(),
+            timeMax=time_max.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=50,
+        )
+        .execute()
+    )
+    return [
+        {
+            "id": e["id"],
+            "title": e.get("summary", ""),
+            "start": e["start"].get("dateTime", e["start"].get("date")),
+            "end": e["end"].get("dateTime", e["end"].get("date")),
+            "all_day": "date" in e["start"],
+            "location": e.get("location"),
+            "calendar": calendar_id,
+        }
+        for e in result.get("items", [])
+    ]
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -72,6 +98,23 @@ def health():
 def list_accounts(_: None = Depends(_verify_key)):
     accounts = [p.stem for p in DATA_DIR.glob("*.json")]
     return {"accounts": accounts}
+
+
+@app.get("/calendars")
+def list_calendars(account: str = Query(...), _: None = Depends(_verify_key)):
+    account = _validate_account(account)
+    creds = _load_creds(account)
+    if not creds:
+        raise HTTPException(status_code=404, detail=f"Account '{account}' not authorized.")
+    service = build("calendar", "v3", credentials=creds)
+    result = service.calendarList().list().execute()
+    return {
+        "account": account,
+        "calendars": [
+            {"id": c["id"], "name": c["summary"], "primary": c.get("primary", False)}
+            for c in result.get("items", [])
+        ],
+    }
 
 
 @app.get("/auth/{account}")
@@ -114,32 +157,16 @@ def get_events(
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=days)
 
-    result = (
-        service.events()
-        .list(
-            calendarId="primary",
-            timeMin=now.isoformat(),
-            timeMax=end.isoformat(),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=50,
-        )
-        .execute()
-    )
+    cal_list = service.calendarList().list().execute()
+    all_events = []
+    for cal in cal_list.get("items", []):
+        try:
+            all_events.extend(_fetch_events(service, cal["id"], now, end))
+        except Exception:
+            pass
 
-    events = [
-        {
-            "id": e["id"],
-            "title": e.get("summary", ""),
-            "start": e["start"].get("dateTime", e["start"].get("date")),
-            "end": e["end"].get("dateTime", e["end"].get("date")),
-            "all_day": "date" in e["start"],
-            "location": e.get("location"),
-        }
-        for e in result.get("items", [])
-    ]
-
-    return {"account": account, "days": days, "count": len(events), "events": events}
+    all_events.sort(key=lambda e: e["start"])
+    return {"account": account, "days": days, "count": len(all_events), "events": all_events}
 
 
 @app.get("/today")
