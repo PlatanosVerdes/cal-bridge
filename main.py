@@ -25,8 +25,10 @@ BASE_URL = os.environ["CAL_BASE_URL"].rstrip("/")
 
 MS_CLIENT_ID = os.environ.get("MS_CLIENT_ID", "")
 MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
+MS_SECRET_CREATES = os.environ.get("MS_SECRET_CREATES", "")
+MS_SECRET_DAYS_DURATION = int(os.environ.get("MS_SECRET_DAYS_DURATION", "0"))
 MS_AUTHORITY = "https://login.microsoftonline.com/common"
-MS_GRAPH_SCOPES = ["https://graph.microsoft.com/Calendars.Read", "offline_access"]
+MS_GRAPH_SCOPES = ["https://graph.microsoft.com/Calendars.Read"]
 
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 GOOGLE_CLIENT_CONFIG = {
@@ -39,7 +41,7 @@ GOOGLE_CLIENT_CONFIG = {
     }
 }
 
-_SAFE_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+_SAFE_NAME = re.compile(r"^[a-zA-Z0-9_.+@-]{1,64}$")
 
 
 def _validate_account(name: str) -> str:
@@ -204,6 +206,36 @@ def _get_ms_events(account: str, time_min: datetime, time_max: datetime) -> list
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/status")
+def status(_: None = Depends(_verify_key)):
+    result: dict = {}
+    if MS_SECRET_CREATES and MS_SECRET_DAYS_DURATION:
+        try:
+            created = datetime.strptime(MS_SECRET_CREATES, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            expires = created + timedelta(days=MS_SECRET_DAYS_DURATION)
+            days = (expires - datetime.now(timezone.utc)).days
+            result["ms_secret"] = {
+                "expires": expires.date().isoformat(),
+                "days_remaining": days,
+                "warning": days < 30,
+            }
+        except ValueError:
+            pass
+    result["google_accounts"] = [p.stem for p in DATA_DIR.glob("*.json") if not p.stem.endswith("_ms")]
+    result["microsoft_accounts"] = [p.stem[:-3] for p in DATA_DIR.glob("*_ms.json")]
+    return result
+
+
+@app.delete("/accounts/{account}")
+def delete_account(account: str, provider: str = Query("google"), _: None = Depends(_verify_key)):
+    _validate_account(account)
+    path = _ms_token_path(account) if provider == "microsoft" else _google_token_path(account)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Account '{account}' ({provider}) not found.")
+    path.unlink()
+    return {"deleted": account, "provider": provider}
 
 
 @app.get("/accounts")

@@ -2,6 +2,13 @@
 
 A lightweight FastAPI service that bridges Google Calendar (and optionally Microsoft Outlook) to a simple JSON API. Designed to run on a Raspberry Pi homelab so that resource-constrained clients like an ESP32 can fetch calendar events with a plain HTTP GET — no OAuth complexity on the device.
 
+## API docs
+
+FastAPI generates interactive documentation automatically:
+
+- `https://<your-domain>/docs` — Swagger UI, ejecutable desde el navegador
+- `https://<your-domain>/redoc` — versión de solo lectura (puede no renderizar bien)
+
 ---
 
 ## Why `CAL_API_KEY`?
